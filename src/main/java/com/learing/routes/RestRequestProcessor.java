@@ -1,5 +1,7 @@
 package com.learing.routes;
 
+import com.baeldung.springsoap.gen.GetCountryResponse;
+import com.learing.model.GetCountryRequestBuilder;
 import com.learing.model.Order;
 import com.learing.service.enricher.OrderEnricherService;
 import com.learing.service.filter.OrderFilterService;
@@ -8,11 +10,12 @@ import org.apache.camel.CamelContext;
 import org.apache.camel.Exchange;
 import org.apache.camel.Processor;
 import org.apache.camel.builder.RouteBuilder;
+import org.apache.camel.component.cxf.common.message.CxfConstants;
 import org.apache.camel.impl.DefaultCamelContext;
 import org.apache.camel.model.rest.RestBindingMode;
+import org.apache.cxf.message.MessageContentsList;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -83,7 +86,9 @@ public class RestRequestProcessor extends RouteBuilder {
                 .routeId("legacyPostOrderAPI")
                 .tracing()
                 .process((exchange) -> {
-
+                    //This stands for the API call to Legacy IKEA Systems
+                    // The outcome of this call is chained to another camel route
+                    // for further processing and eventually we return response to user.
                 })
                 .to("direct:filterOrderResult");
 
@@ -97,13 +102,31 @@ public class RestRequestProcessor extends RouteBuilder {
                 });
     }
 
-    private void configureHelloWorldAPI(){
+    private void configureHelloWorldAPI() {
         rest().get("/hello")
-                .produces(MediaType.APPLICATION_JSON.toString())
                 .to("direct:hello");
 
         //Simple hello world API
         from("direct:hello")
-                .transform().constant("Hello there!");
+                .setBody(constant("Spain"))
+                .bean(GetCountryRequestBuilder.class)
+                .setHeader(CxfConstants.OPERATION_NAME, constant("getCountry"))
+                .to("cxf://http://localhost:8080/ws?wsdlURL=/wsdl/countries.wsdl" +
+                        "&serviceClass=com.baeldung.springsoap.gen.CountriesPort")
+                .log("The Population is : ${body[0].getCountry().getPopulation()}")
+                .process(new Processor() {
+                    @Override
+                    public void process(Exchange exchange) throws Exception {
+                        System.out.println(exchange);
+                        MessageContentsList list = (MessageContentsList) exchange.getIn().getBody();
+                        if (list != null && list.size() > 0) {
+                            GetCountryResponse response = (GetCountryResponse) list.get(0);
+                            exchange.getIn().setBody(response.getCountry());
+                        }
+                    }
+                })
+                .setHeader("intercepted-request", constant(200));
+
+
     }
 }
